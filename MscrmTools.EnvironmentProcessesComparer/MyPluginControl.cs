@@ -24,9 +24,23 @@ namespace MscrmTools.EnvironmentProcessesComparer
         private Thread filterThread;
         private List<Entity> solutions = new List<Entity>();
 
+        // Shift-click range selection support
+        private ListViewItem _lastCheckedItem = null;
+        private bool _isBatchUpdating = false;
+
+        // Debounce timer for "Selection in progress" label
+        private System.Windows.Forms.Timer _selectionDebounceTimer;
+
         public MyPluginControl()
         {
             InitializeComponent();
+
+            _selectionDebounceTimer = new System.Windows.Forms.Timer { Interval = 300 };
+            _selectionDebounceTimer.Tick += (s, e) =>
+            {
+                _selectionDebounceTimer.Stop();
+                UpdateSelectionCount();
+            };
         }
 
         public string DonationDescription => "Donation for Environment Processes Comparer";
@@ -77,6 +91,10 @@ namespace MscrmTools.EnvironmentProcessesComparer
 
         private void ClearContent()
         {
+            _lastCheckedItem = null;
+            tsbSelectAll.Enabled = false;
+            tsbDeselectAll.Enabled = false;
+            tsbSelectEnabled.Enabled = false;
             lvProcesses.Items.Clear();
             AdditionalConnectionDetails.Clear();
             for (var i = lvProcesses.Columns.Count - 1; i >= 3; i--)
@@ -175,7 +193,7 @@ namespace MscrmTools.EnvironmentProcessesComparer
 
             WorkAsync(new WorkAsyncInfo
             {
-                Message = "Loading processes...",
+                Message = "Fetching processes from Dataverse...",
                 Work = (bw, e) =>
                 {
                     var pManager = new ProcessManager(Service);
@@ -189,27 +207,53 @@ namespace MscrmTools.EnvironmentProcessesComparer
                         return;
                     }
 
-                    foreach (var pi in _processInfos)
+                    var visibleItems = _processInfos.Where(p =>
+                        string.IsNullOrEmpty(tstbFilter.Text) || p.Item.Text.ToLower().IndexOf(tstbFilter.Text.ToLower()) >= 0)
+                    .Where(p => chkShowActions.Checked && p.CategoryCode == 3
+                        || chkShowBusinessProcessFlows.Checked && p.CategoryCode == 4
+                        || chkShowBusinessRules.Checked && p.CategoryCode == 2
+                        || chkShowModernFlows.Checked && p.CategoryCode == 5
+                        || chkShowWorkflows.Checked && p.CategoryCode == 0
+                    )
+                    .Where(p => !chkShowOnlyDifference.Checked || chkShowOnlyDifference.Checked && p.HasDifference)
+                    .ToList();
+
+                    // Show status in toolbar so user knows something is happening after overlay disappears
+                    lblStatus.Text = "Loading - please wait!";
+                    lblStatus.ForeColor = System.Drawing.Color.Red;
+                    lblStatus.Font = new System.Drawing.Font(lblStatus.Font, System.Drawing.FontStyle.Bold);
+                    lblStatus.Refresh();
+
+                    lvProcesses.SelectedIndexChanged -= lvProcesses_SelectedIndexChanged;
+                    lvProcesses.BeginUpdate();
+
+                    foreach (var pi in visibleItems)
                     {
                         var grp = pi.Category;
-
                         if (lvProcesses.Groups[grp] == null)
                         {
                             lvProcesses.Groups.Add(grp, grp);
                         }
-
                         pi.Item.Group = lvProcesses.Groups[grp];
                     }
 
-                    DisplayProcesses();
+                    lvProcesses.Items.AddRange(visibleItems.Select(pi => pi.Item).ToArray());
+                    lvProcesses.EndUpdate();
 
                     lvProcesses.AutoResizeColumn(0, ColumnHeaderAutoResizeStyle.ColumnContent);
                     lvProcesses.AutoResizeColumn(1, ColumnHeaderAutoResizeStyle.ColumnContent);
                     lvProcesses.AutoResizeColumn(2, ColumnHeaderAutoResizeStyle.HeaderSize);
+                    lvProcesses.SelectedIndexChanged += lvProcesses_SelectedIndexChanged;
 
                     tsbAddFromOtherEnvs.Enabled = true;
                     tsbBulkUpdate.Enabled = true;
                     tsbHideBulkUpdateLogs.Enabled = true;
+                    tsbSelectAll.Enabled = true;
+                    tsbDeselectAll.Enabled = true;
+                    tsbSelectEnabled.Enabled = true;
+                    lblStatus.ForeColor = System.Drawing.Color.DimGray;
+                    lblStatus.Font = new System.Drawing.Font(lblStatus.Font, System.Drawing.FontStyle.Italic);
+                    UpdateSelectionCount();
                 }
             });
         }
@@ -337,6 +381,12 @@ namespace MscrmTools.EnvironmentProcessesComparer
 
         private void lvProcesses_SelectedIndexChanged(object sender, EventArgs e)
         {
+            // Show "Selection in progress" while group selection is settling,
+            // then debounce back to the normal count after 300ms of inactivity
+            lblStatus.Text = "Selection in progress...";
+            _selectionDebounceTimer.Stop();
+            _selectionDebounceTimer.Start();
+
             var selectedItem = lvProcesses.SelectedItems.Cast<ListViewItem>().FirstOrDefault();
             if (selectedItem == null) return;
 
@@ -374,6 +424,97 @@ namespace MscrmTools.EnvironmentProcessesComparer
             scMain.Panel2Collapsed = false;
         }
 
+        private void UpdateSelectionCount()
+        {
+            int checked_ = lvProcesses.CheckedItems.Count;
+            int total = lvProcesses.Items.Count;
+            lblStatus.Text = $"{checked_} of {total} selected";
+        }
+
+        private void lvProcesses_MouseClick(object sender, MouseEventArgs e)
+        {
+            // Only handle left-clicks — right-click is for the context menu
+            if (e.Button != MouseButtons.Left) return;
+
+            var clickedItem = lvProcesses.GetItemAt(e.X, e.Y);
+            if (clickedItem == null) return;
+
+            if (ModifierKeys == Keys.Shift && _lastCheckedItem != null)
+            {
+                int start = Math.Min(_lastCheckedItem.Index, clickedItem.Index);
+                int end = Math.Max(_lastCheckedItem.Index, clickedItem.Index);
+                // Checked has already toggled by the time MouseClick fires, so use current state
+                bool targetState = clickedItem.Checked;
+
+                _isBatchUpdating = true;
+                for (int i = start; i <= end; i++)
+                {
+                    lvProcesses.Items[i].Checked = targetState;
+                }
+                _isBatchUpdating = false;
+                UpdateSelectionCount();
+            }
+            else
+            {
+                _lastCheckedItem = clickedItem;
+            }
+        }
+
+        private void lvProcesses_ItemChecked(object sender, ItemCheckedEventArgs e)
+        {
+            if (_isBatchUpdating) return;
+            UpdateSelectionCount();
+        }
+
+        private void lvProcesses_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Control && e.KeyCode == Keys.A)
+            {
+                _isBatchUpdating = true;
+                foreach (ListViewItem item in lvProcesses.Items)
+                {
+                    item.Checked = true;
+                }
+                _isBatchUpdating = false;
+                UpdateSelectionCount();
+                e.Handled = true;
+            }
+        }
+
+        private void tsbSelectEnabled_Click(object sender, EventArgs e)
+        {
+            // Column 2 is always the primary environment state column
+            _isBatchUpdating = true;
+            foreach (ListViewItem item in lvProcesses.Items)
+            {
+                item.Checked = item.SubItems.Count > 2 && item.SubItems[2].Text == "True";
+            }
+            _isBatchUpdating = false;
+            UpdateSelectionCount();
+        }
+
+        private void tsbSelectAll_Click(object sender, EventArgs e)
+        {
+            _isBatchUpdating = true;
+            foreach (ListViewItem item in lvProcesses.Items)
+            {
+                item.Checked = true;
+            }
+            _isBatchUpdating = false;
+            UpdateSelectionCount();
+        }
+
+        private void tsbDeselectAll_Click(object sender, EventArgs e)
+        {
+            _isBatchUpdating = true;
+            foreach (ListViewItem item in lvProcesses.Items)
+            {
+                item.Checked = false;
+            }
+            _isBatchUpdating = false;
+            UpdateSelectionCount();
+        }
+
         private void tsbAddFromOtherEnvs_Click(object sender, EventArgs e)
         {
             AddAdditionalOrganization();
@@ -381,107 +522,107 @@ namespace MscrmTools.EnvironmentProcessesComparer
 
         private void tsbBulkUpdate_Click(object sender, EventArgs e)
         {
-           
-                using (var bulkForm = new BulkUpdateSettings(ConnectionDetail, AdditionalConnectionDetails.ToList()))
+
+            using (var bulkForm = new BulkUpdateSettings(ConnectionDetail, AdditionalConnectionDetails.ToList()))
+            {
+                if (DialogResult.OK == bulkForm.ShowDialog(this))
                 {
-                    if (DialogResult.OK == bulkForm.ShowDialog(this))
+                    scSecondary.Panel2Collapsed = false;
+                    lvBulkUpdateLogs.Items.Clear();
+
+                    if (bulkForm.IsUpdateAcrossEnvs)
                     {
-                        scSecondary.Panel2Collapsed = false;
-                        lvBulkUpdateLogs.Items.Clear();
+                        var sourceDetail = bulkForm.Source;
+                        var targetDetails = bulkForm.Targets;
+                        var onlyChecked = bulkForm.OnlyCheckedProcesses;
 
-                        if (bulkForm.IsUpdateAcrossEnvs)
+                        if (onlyChecked && lvProcesses.CheckedItems.Count == 0)
                         {
-                            var sourceDetail = bulkForm.Source;
-                            var targetDetails = bulkForm.Targets;
-                            var onlyChecked = bulkForm.OnlyCheckedProcesses;
+                            MessageBox.Show(this, "You did not checked any process", "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                            return;
+                        }
 
-                            if (onlyChecked && lvProcesses.CheckedItems.Count == 0)
+                        var targetIndexes = new List<int>();
+                        int sourceIndex = -1;
+
+                        foreach (var col in lvProcesses.Columns.Cast<ColumnHeader>().Where(c => c.Tag != null))
+                        {
+                            var cd = (ConnectionDetail)col.Tag;
+                            if (cd == sourceDetail)
                             {
-                                MessageBox.Show(this, "You did not checked any process", "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                                return;
+                                sourceIndex = col.Index;
                             }
-
-                            var targetIndexes = new List<int>();
-                            int sourceIndex = -1;
-
-                            foreach (var col in lvProcesses.Columns.Cast<ColumnHeader>().Where(c => c.Tag != null))
+                            else if (targetDetails.Contains(cd))
                             {
-                                var cd = (ConnectionDetail)col.Tag;
-                                if (cd == sourceDetail)
-                                {
-                                    sourceIndex = col.Index;
-                                }
-                                else if (targetDetails.Contains(cd))
-                                {
-                                    targetIndexes.Add(col.Index);
-                                }
+                                targetIndexes.Add(col.Index);
                             }
+                        }
 
-                            var processesToUpdate = onlyChecked
-                                    ? lvProcesses.Items.Cast<ListViewItem>().Where(p => p.Checked).Select(p => (ProcessInfo)p.Tag).ToList()
-                                    : lvProcesses.Items.Cast<ListViewItem>().Select(p => (ProcessInfo)p.Tag).ToList();
+                        var processesToUpdate = onlyChecked
+                                ? lvProcesses.Items.Cast<ListViewItem>().Where(p => p.Checked).Select(p => (ProcessInfo)p.Tag).ToList()
+                                : lvProcesses.Items.Cast<ListViewItem>().Select(p => (ProcessInfo)p.Tag).ToList();
 
-                            WorkAsync(new WorkAsyncInfo
+                        WorkAsync(new WorkAsyncInfo
+                        {
+                            Message = "Updating processes...",
+                            Work = (bw, evt) =>
                             {
-                                Message = "Updating processes...",
-                                Work = (bw, evt) =>
-                                {
-                                    var pManager = new ProcessManager(sourceDetail.GetCrmServiceClient());
+                                var pManager = new ProcessManager(sourceDetail.GetCrmServiceClient());
 
-                                    foreach (var process in processesToUpdate)
+                                foreach (var process in processesToUpdate)
+                                {
+                                    foreach (var targetIndex in targetIndexes)
                                     {
-                                        foreach (var targetIndex in targetIndexes)
+                                        if (process.Item.SubItems[targetIndex].Text == process.Item.SubItems[sourceIndex].Text)
                                         {
-                                            if (process.Item.SubItems[targetIndex].Text == process.Item.SubItems[sourceIndex].Text)
-                                            {
-                                                continue;
-                                            }
+                                            continue;
+                                        }
 
-                                            bw.ReportProgress(0, $"Processing {process.Name} on {lvProcesses.Columns[targetIndex].Text}...");
+                                        bw.ReportProgress(0, $"Processing {process.Name} on {lvProcesses.Columns[targetIndex].Text}...");
 
-                                            var toUpdate = new Entity(process.Record.LogicalName)
+                                        var toUpdate = new Entity(process.Record.LogicalName)
+                                        {
+                                            Id = process.Record.Id
+                                        };
+                                        toUpdate["statecode"] = new OptionSetValue(process.Item.SubItems[sourceIndex].Text == "True" ? 1 : 0);
+                                        toUpdate["statuscode"] = new OptionSetValue(process.Item.SubItems[sourceIndex].Text == "True" ? 2 : 1);
+                                        try
+                                        {
+                                            var cd = ((ConnectionDetail)lvProcesses.Columns[targetIndex].Tag);
+                                            cd.GetCrmServiceClient().Update(toUpdate);
+                                            process.Statuses[cd]["statecode"] = toUpdate["statecode"];
+                                            process.Statuses[cd]["statuscode"] = toUpdate["statuscode"];
+                                            bw.ReportProgress(0, new BulkUpdateInfo
                                             {
-                                                Id = process.Record.Id
-                                            };
-                                            toUpdate["statecode"] = new OptionSetValue(process.Item.SubItems[sourceIndex].Text == "True" ? 1 : 0);
-                                            toUpdate["statuscode"] = new OptionSetValue(process.Item.SubItems[sourceIndex].Text == "True" ? 2 : 1);
-                                            try
+                                                Success = true,
+                                                ProcessName = process.Name,
+                                                TargetEnvironment = lvProcesses.Columns[targetIndex].Text,
+                                                Message = $"{((int)toUpdate["statecode"] == 0 ? "Disabled" : "Enabled")} successfully"
+                                            });
+                                        }
+                                        catch (Exception error)
+                                        {
+                                            bw.ReportProgress(0, new BulkUpdateInfo
                                             {
-                                                var cd = ((ConnectionDetail)lvProcesses.Columns[targetIndex].Tag);
-                                                cd.GetCrmServiceClient().Update(toUpdate);
-                                                process.Statuses[cd]["statecode"] = toUpdate["statecode"];
-                                                process.Statuses[cd]["statuscode"] = toUpdate["statuscode"];
-                                                bw.ReportProgress(0, new BulkUpdateInfo
-                                                {
-                                                    Success = true,
-                                                    ProcessName = process.Name,
-                                                    TargetEnvironment = lvProcesses.Columns[targetIndex].Text,
-                                                    Message = $"{((int)toUpdate["statecode"] == 0 ? "Disabled" : "Enabled")} successfully"
-                                                });
-                                            }
-                                            catch (Exception error)
-                                            {
-                                                bw.ReportProgress(0, new BulkUpdateInfo
-                                                {
-                                                    Success = false,
-                                                    ProcessName = process.Name,
-                                                    TargetEnvironment = lvProcesses.Columns[targetIndex].Text,
-                                                    Message = error.Message
-                                                });
-                                            }
+                                                Success = false,
+                                                ProcessName = process.Name,
+                                                TargetEnvironment = lvProcesses.Columns[targetIndex].Text,
+                                                Message = error.Message
+                                            });
                                         }
                                     }
+                                }
 
-                                    evt.Result = processesToUpdate;
-                                },
-                                ProgressChanged = evt =>
+                                evt.Result = processesToUpdate;
+                            },
+                            ProgressChanged = evt =>
+                            {
+                                if (evt.UserState is BulkUpdateInfo bui)
                                 {
-                                    if (evt.UserState is BulkUpdateInfo bui)
+                                    lvBulkUpdateLogs.Items.Add(new ListViewItem
                                     {
-                                        lvBulkUpdateLogs.Items.Add(new ListViewItem
-                                        {
-                                            Text = bui.ProcessName,
-                                            SubItems =
+                                        Text = bui.ProcessName,
+                                        SubItems =
                                             {
                                             new ListViewItem.ListViewSubItem
                                             {
@@ -492,104 +633,104 @@ namespace MscrmTools.EnvironmentProcessesComparer
                                                 Text = bui.Message
                                             }
                                             },
-                                            ForeColor = bui.Success ? Color.Green : Color.Red
-                                        });
+                                        ForeColor = bui.Success ? Color.Green : Color.Red
+                                    });
 
-                                        scSecondary.Panel2Collapsed = false;
+                                    scSecondary.Panel2Collapsed = false;
 
-                                        return;
-                                    }
-
-                                    SetWorkingMessage(evt.UserState.ToString());
-                                },
-                                PostWorkCallBack = evt =>
-                                {
-                                    var processes = (List<ProcessInfo>)evt.Result;
-                                    foreach (var process in processes)
-                                    {
-                                        process.UpdateListViewItem();
-                                    }
+                                    return;
                                 }
-                            });
-                        }
-                        else
+
+                                SetWorkingMessage(evt.UserState.ToString());
+                            },
+                            PostWorkCallBack = evt =>
+                            {
+                                var processes = (List<ProcessInfo>)evt.Result;
+                                foreach (var process in processes)
+                                {
+                                    process.UpdateListViewItem();
+                                }
+                            }
+                        });
+                    }
+                    else
+                    {
+                        if (lvProcesses.CheckedItems.Count == 0)
                         {
-                            if (lvProcesses.CheckedItems.Count == 0)
+                            MessageBox.Show(this, "You did not checked any process", "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                            return;
+                        }
+
+                        var processesToUpdate = lvProcesses.Items.Cast<ListViewItem>().Where(p => p.Checked).Select(p => (ProcessInfo)p.Tag).ToList();
+                        var connections = bulkForm.Targets;
+                        var isEnabled = bulkForm.SetToEnabled;
+
+                        var targetIndexes = new List<int>();
+
+                        foreach (var col in lvProcesses.Columns.Cast<ColumnHeader>().Where(c => c.Tag != null))
+                        {
+                            var cd = (ConnectionDetail)col.Tag;
+                            if (connections.Contains(cd))
                             {
-                                MessageBox.Show(this, "You did not checked any process", "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                                return;
+                                targetIndexes.Add(col.Index);
                             }
+                        }
 
-                            var processesToUpdate = lvProcesses.Items.Cast<ListViewItem>().Where(p => p.Checked).Select(p => (ProcessInfo)p.Tag).ToList();
-                            var connections = bulkForm.Targets;
-                            var isEnabled = bulkForm.SetToEnabled;
-
-                            var targetIndexes = new List<int>();
-
-                            foreach (var col in lvProcesses.Columns.Cast<ColumnHeader>().Where(c => c.Tag != null))
+                        WorkAsync(new WorkAsyncInfo
+                        {
+                            Message = "Updating processes...",
+                            Work = (bw, evt) =>
                             {
-                                var cd = (ConnectionDetail)col.Tag;
-                                if (connections.Contains(cd))
+                                foreach (var process in processesToUpdate)
                                 {
-                                    targetIndexes.Add(col.Index);
-                                }
-                            }
-
-                            WorkAsync(new WorkAsyncInfo
-                            {
-                                Message = "Updating processes...",
-                                Work = (bw, evt) =>
-                                {
-                                    foreach (var process in processesToUpdate)
+                                    foreach (var targetIndex in targetIndexes)
                                     {
-                                        foreach (var targetIndex in targetIndexes)
+                                        bw.ReportProgress(0, $"Processing {process.Name} on {lvProcesses.Columns[targetIndex].Text}...");
+
+                                        var toUpdate = new Entity(process.Record.LogicalName)
                                         {
-                                            bw.ReportProgress(0, $"Processing {process.Name} on {lvProcesses.Columns[targetIndex].Text}...");
+                                            Id = process.Record.Id
+                                        };
+                                        toUpdate["statecode"] = new OptionSetValue(isEnabled ? 1 : 0);
+                                        toUpdate["statuscode"] = new OptionSetValue(isEnabled ? 2 : 1);
 
-                                            var toUpdate = new Entity(process.Record.LogicalName)
+                                        try
+                                        {
+                                            var cd = ((ConnectionDetail)lvProcesses.Columns[targetIndex].Tag);
+                                            cd.GetCrmServiceClient().Update(toUpdate);
+                                            process.Statuses[cd]["statecode"] = toUpdate["statecode"];
+                                            process.Statuses[cd]["statuscode"] = toUpdate["statuscode"];
+                                            bw.ReportProgress(0, new BulkUpdateInfo
                                             {
-                                                Id = process.Record.Id
-                                            };
-                                            toUpdate["statecode"] = new OptionSetValue(isEnabled ? 1 : 0);
-                                            toUpdate["statuscode"] = new OptionSetValue(isEnabled ? 2 : 1);
-
-                                            try
+                                                Success = true,
+                                                ProcessName = process.Name,
+                                                TargetEnvironment = lvProcesses.Columns[targetIndex].Text,
+                                                Message = $"{(((OptionSetValue)toUpdate["statecode"]).Value == 0 ? "Disabled" : "Enabled")} successfully"
+                                            });
+                                        }
+                                        catch (Exception error)
+                                        {
+                                            bw.ReportProgress(0, new BulkUpdateInfo
                                             {
-                                                var cd = ((ConnectionDetail)lvProcesses.Columns[targetIndex].Tag);
-                                                cd.GetCrmServiceClient().Update(toUpdate);
-                                                process.Statuses[cd]["statecode"] = toUpdate["statecode"];
-                                                process.Statuses[cd]["statuscode"] = toUpdate["statuscode"];
-                                                bw.ReportProgress(0, new BulkUpdateInfo
-                                                {
-                                                    Success = true,
-                                                    ProcessName = process.Name,
-                                                    TargetEnvironment = lvProcesses.Columns[targetIndex].Text,
-                                                    Message = $"{(((OptionSetValue)toUpdate["statecode"]).Value == 0 ? "Disabled" : "Enabled")} successfully"
-                                                });
-                                            }
-                                            catch (Exception error)
-                                            {
-                                                bw.ReportProgress(0, new BulkUpdateInfo
-                                                {
-                                                    Success = false,
-                                                    ProcessName = process.Name,
-                                                    TargetEnvironment = lvProcesses.Columns[targetIndex].Text,
-                                                    Message = error.Message
-                                                });
-                                            }
+                                                Success = false,
+                                                ProcessName = process.Name,
+                                                TargetEnvironment = lvProcesses.Columns[targetIndex].Text,
+                                                Message = error.Message
+                                            });
                                         }
                                     }
+                                }
 
-                                    evt.Result = processesToUpdate;
-                                },
-                                ProgressChanged = evt =>
+                                evt.Result = processesToUpdate;
+                            },
+                            ProgressChanged = evt =>
+                            {
+                                if (evt.UserState is BulkUpdateInfo bui)
                                 {
-                                    if (evt.UserState is BulkUpdateInfo bui)
+                                    lvBulkUpdateLogs.Items.Add(new ListViewItem
                                     {
-                                        lvBulkUpdateLogs.Items.Add(new ListViewItem
-                                        {
-                                            Text = bui.ProcessName,
-                                            SubItems =
+                                        Text = bui.ProcessName,
+                                        SubItems =
                                             {
                                             new ListViewItem.ListViewSubItem
                                             {
@@ -600,29 +741,29 @@ namespace MscrmTools.EnvironmentProcessesComparer
                                                 Text = bui.Message
                                             }
                                             },
-                                            ForeColor = bui.Success ? Color.Green : Color.Red
-                                        });
+                                        ForeColor = bui.Success ? Color.Green : Color.Red
+                                    });
 
-                                        scSecondary.Panel2Collapsed = false;
+                                    scSecondary.Panel2Collapsed = false;
 
-                                        return;
-                                    }
-
-                                    SetWorkingMessage(evt.UserState.ToString());
-                                },
-                                PostWorkCallBack = evt =>
-                                {
-                                    var processes = (List<ProcessInfo>)evt.Result;
-                                    foreach (var process in processes)
-                                    {
-                                        process.UpdateListViewItem();
-                                    }
+                                    return;
                                 }
-                            });
-                        }
+
+                                SetWorkingMessage(evt.UserState.ToString());
+                            },
+                            PostWorkCallBack = evt =>
+                            {
+                                var processes = (List<ProcessInfo>)evt.Result;
+                                foreach (var process in processes)
+                                {
+                                    process.UpdateListViewItem();
+                                }
+                            }
+                        });
                     }
                 }
-           
+            }
+
         }
 
         private void tsbExportToExcel_Click(object sender, EventArgs e)

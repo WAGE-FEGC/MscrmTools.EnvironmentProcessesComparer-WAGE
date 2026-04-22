@@ -1,5 +1,4 @@
-﻿
-namespace MscrmTools.EnvironmentProcessesComparer
+﻿namespace MscrmTools.EnvironmentProcessesComparer
 {
     partial class MyPluginControl
     {
@@ -37,12 +36,17 @@ namespace MscrmTools.EnvironmentProcessesComparer
             this.toolStripSeparator1 = new System.Windows.Forms.ToolStripSeparator();
             this.tslFilter = new System.Windows.Forms.ToolStripLabel();
             this.tstbFilter = new System.Windows.Forms.ToolStripTextBox();
+            this.toolStripSeparator3 = new System.Windows.Forms.ToolStripSeparator();
+            this.tsbSelectAll = new System.Windows.Forms.ToolStripButton();
+            this.tsbDeselectAll = new System.Windows.Forms.ToolStripButton();
+            this.tsbSelectEnabled = new System.Windows.Forms.ToolStripButton();
             this.tssBulkUpdate = new System.Windows.Forms.ToolStripSeparator();
             this.tsbBulkUpdate = new System.Windows.Forms.ToolStripButton();
             this.tsbHideBulkUpdateLogs = new System.Windows.Forms.ToolStripButton();
             this.toolStripSeparator2 = new System.Windows.Forms.ToolStripSeparator();
             this.tsbExportToExcel = new System.Windows.Forms.ToolStripButton();
             this.pnlFilter = new System.Windows.Forms.Panel();
+            this.lblStatus = new System.Windows.Forms.Label();
             this.chkShowOnlyDifference = new System.Windows.Forms.CheckBox();
             this.label2 = new System.Windows.Forms.Label();
             this.chkShowBusinessProcessFlows = new System.Windows.Forms.CheckBox();
@@ -83,6 +87,10 @@ namespace MscrmTools.EnvironmentProcessesComparer
             this.toolStripSeparator1,
             this.tslFilter,
             this.tstbFilter,
+            this.toolStripSeparator3,
+            this.tsbSelectAll,
+            this.tsbDeselectAll,
+            this.tsbSelectEnabled,
             this.tssBulkUpdate,
             this.tsbBulkUpdate,
             this.tsbHideBulkUpdateLogs,
@@ -147,6 +155,41 @@ namespace MscrmTools.EnvironmentProcessesComparer
             this.tstbFilter.Size = new System.Drawing.Size(267, 39);
             this.tstbFilter.TextChanged += new System.EventHandler(this.filterCriteriaChanged);
             // 
+            // toolStripSeparator3
+            // 
+            this.toolStripSeparator3.Name = "toolStripSeparator3";
+            this.toolStripSeparator3.Size = new System.Drawing.Size(6, 39);
+            // 
+            // tsbSelectAll
+            // 
+            this.tsbSelectAll.Enabled = false;
+            this.tsbSelectAll.Image = global::MscrmTools.EnvironmentProcessesComparer.Properties.Resources.CheckCircle;
+            this.tsbSelectAll.ImageTransparentColor = System.Drawing.Color.Magenta;
+            this.tsbSelectAll.Name = "tsbSelectAll";
+            this.tsbSelectAll.Size = new System.Drawing.Size(112, 36);
+            this.tsbSelectAll.Text = "Select All";
+            this.tsbSelectAll.Click += new System.EventHandler(this.tsbSelectAll_Click);
+            // 
+            // tsbDeselectAll
+            // 
+            this.tsbDeselectAll.Enabled = false;
+            this.tsbDeselectAll.Image = global::MscrmTools.EnvironmentProcessesComparer.Properties.Resources.UnCheckCircle;
+            this.tsbDeselectAll.ImageTransparentColor = System.Drawing.Color.Magenta;
+            this.tsbDeselectAll.Name = "tsbDeselectAll";
+            this.tsbDeselectAll.Size = new System.Drawing.Size(122, 36);
+            this.tsbDeselectAll.Text = "Deselect All";
+            this.tsbDeselectAll.Click += new System.EventHandler(this.tsbDeselectAll_Click);
+            // 
+            // tsbSelectEnabled
+            // 
+            this.tsbSelectEnabled.Enabled = false;
+            this.tsbSelectEnabled.Image = global::MscrmTools.EnvironmentProcessesComparer.Properties.Resources.AllEnabledCircle;
+            this.tsbSelectEnabled.ImageTransparentColor = System.Drawing.Color.Magenta;
+            this.tsbSelectEnabled.Name = "tsbSelectEnabled";
+            this.tsbSelectEnabled.Size = new System.Drawing.Size(142, 36);
+            this.tsbSelectEnabled.Text = "Select Enabled";
+            this.tsbSelectEnabled.Click += new System.EventHandler(this.tsbSelectEnabled_Click);
+            // 
             // tssBulkUpdate
             // 
             this.tssBulkUpdate.Name = "tssBulkUpdate";
@@ -188,6 +231,7 @@ namespace MscrmTools.EnvironmentProcessesComparer
             // 
             // pnlFilter
             // 
+            this.pnlFilter.Controls.Add(this.lblStatus);
             this.pnlFilter.Controls.Add(this.chkShowOnlyDifference);
             this.pnlFilter.Controls.Add(this.label2);
             this.pnlFilter.Controls.Add(this.chkShowBusinessProcessFlows);
@@ -202,6 +246,18 @@ namespace MscrmTools.EnvironmentProcessesComparer
             this.pnlFilter.Name = "pnlFilter";
             this.pnlFilter.Size = new System.Drawing.Size(1418, 53);
             this.pnlFilter.TabIndex = 6;
+            // 
+            // lblStatus
+            // 
+            this.lblStatus.Dock = System.Windows.Forms.DockStyle.Right;
+            this.lblStatus.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Italic);
+            this.lblStatus.ForeColor = System.Drawing.Color.DimGray;
+            this.lblStatus.Name = "lblStatus";
+            this.lblStatus.Padding = new System.Windows.Forms.Padding(0, 0, 10, 0);
+            this.lblStatus.Size = new System.Drawing.Size(200, 53);
+            this.lblStatus.TabIndex = 13;
+            this.lblStatus.Text = "0 selected";
+            this.lblStatus.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
             // 
             // chkShowOnlyDifference
             // 
@@ -359,7 +415,7 @@ namespace MscrmTools.EnvironmentProcessesComparer
             this.lvProcesses.HideSelection = false;
             this.lvProcesses.Location = new System.Drawing.Point(0, 0);
             this.lvProcesses.Margin = new System.Windows.Forms.Padding(3, 2, 3, 2);
-            this.lvProcesses.MultiSelect = false;
+            this.lvProcesses.MultiSelect = true;
             this.lvProcesses.Name = "lvProcesses";
             this.lvProcesses.OwnerDraw = true;
             this.lvProcesses.Size = new System.Drawing.Size(1418, 598);
@@ -370,6 +426,9 @@ namespace MscrmTools.EnvironmentProcessesComparer
             this.lvProcesses.DrawColumnHeader += new System.Windows.Forms.DrawListViewColumnHeaderEventHandler(this.lvProcesses_DrawColumnHeader);
             this.lvProcesses.DrawSubItem += new System.Windows.Forms.DrawListViewSubItemEventHandler(this.lvProcesses_DrawSubItem);
             this.lvProcesses.SelectedIndexChanged += new System.EventHandler(this.lvProcesses_SelectedIndexChanged);
+            this.lvProcesses.MouseClick += new System.Windows.Forms.MouseEventHandler(this.lvProcesses_MouseClick);
+            this.lvProcesses.ItemChecked += new System.Windows.Forms.ItemCheckedEventHandler(this.lvProcesses_ItemChecked);
+            this.lvProcesses.KeyDown += new System.Windows.Forms.KeyEventHandler(this.lvProcesses_KeyDown);
             // 
             // chName
             // 
@@ -489,5 +548,10 @@ namespace MscrmTools.EnvironmentProcessesComparer
         private System.Windows.Forms.ColumnHeader chTargetEnv;
         private System.Windows.Forms.ColumnHeader chMessage;
         private System.Windows.Forms.ToolStripButton tsbHideBulkUpdateLogs;
+        private System.Windows.Forms.ToolStripSeparator toolStripSeparator3;
+        private System.Windows.Forms.ToolStripButton tsbSelectAll;
+        private System.Windows.Forms.ToolStripButton tsbDeselectAll;
+        private System.Windows.Forms.ToolStripButton tsbSelectEnabled;
+        private System.Windows.Forms.Label lblStatus;
     }
 }

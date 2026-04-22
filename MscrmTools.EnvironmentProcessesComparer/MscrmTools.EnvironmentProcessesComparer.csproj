@@ -165,15 +165,19 @@
       <Version>1.2025.7.71</Version>
     </PackageReference>
   </ItemGroup>
+  <ItemGroup>
+    <Content Include="Resources\AllEnabledCircle.png" />
+    <Content Include="Resources\CheckCircle.png" />
+    <Content Include="Resources\UnCheckCircle.png" />
+  </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <PropertyGroup>
-    <PostBuildEvent>
-      IF $(ConfigurationName) == Debug (
-      IF NOT EXIST Plugins mkdir Plugins
-      xcopy "$(TargetDir)$(TargetFileName)" "$(TargetDir)Plugins\" /Y
-      xcopy "$(TargetDir)$(TargetName).pdb" "$(TargetDir)Plugins\" /Y
-      )
-    </PostBuildEvent>
+    <PostBuildEvent>IF $(ConfigurationName) == Debug (
+    IF NOT EXIST Plugins mkdir Plugins
+    xcopy "$(TargetDir)$(TargetFileName)" "$(TargetDir)Plugins\" /Y
+    xcopy "$(TargetDir)$(TargetName).pdb" "$(TargetDir)Plugins\" /Y
+    copy "$(TargetPath)" "%25APPDATA%25\MscrmTools\XrmToolBox\Plugins\"
+)</PostBuildEvent>
   </PropertyGroup>
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it.
        Other similar extension points exist, see Microsoft.Common.targets.
